@@ -1,0 +1,389 @@
+"""
+Complete MNIST Training Script
+Contains 4 optimizers:
+- AdaFusion (your optimizer)
+- Adam
+- RMSProp
+- SGD with Momentum
+
+Architecture: 784-128-64-10
+Batch size: 64
+Epochs: 20
+LR = 0.001 for all optimizers
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+
+
+# ============================================================
+# 1. MODEL: 784 → 128 → 64 → 10
+# ============================================================
+
+class SimpleNN:
+    def __init__(self):
+        self.W1 = np.random.randn(784, 128) * np.sqrt(2/784)
+        self.b1 = np.zeros((1,128))
+
+        self.W2 = np.random.randn(128, 64) * np.sqrt(2/128)
+        self.b2 = np.zeros((1,64))
+
+        self.W3 = np.random.randn(64, 10) * np.sqrt(2/64)
+        self.b3 = np.zeros((1,10))
+
+        self.params = {
+            "W1": self.W1, "b1": self.b1,
+            "W2": self.W2, "b2": self.b2,
+            "W3": self.W3, "b3": self.b3
+        }
+
+    def relu(self, Z):
+        return np.maximum(0, Z)
+
+    def relu_derivative(self, Z):
+        return (Z > 0).astype(float)
+
+    def softmax(self, Z):
+        expZ = np.exp(Z - np.max(Z, axis=1, keepdims=True))
+        return expZ / np.sum(expZ, axis=1, keepdims=True)
+
+    def forward(self, X):
+        self.X = X
+        self.Z1 = X @ self.W1 + self.b1
+        self.A1 = self.relu(self.Z1)
+
+        self.Z2 = self.A1 @ self.W2 + self.b2
+        self.A2 = self.relu(self.Z2)
+
+        self.Z3 = self.A2 @ self.W3 + self.b3
+        self.A3 = self.softmax(self.Z3)
+        return self.A3
+
+    def backward(self, y):
+        m = y.shape[0]
+
+        dZ3 = self.A3 - y
+        dW3 = self.A2.T @ dZ3 / m
+        db3 = np.sum(dZ3, axis=0, keepdims=True)/m
+
+        dA2 = dZ3 @ self.W3.T
+        dZ2 = dA2 * self.relu_derivative(self.Z2)
+        dW2 = self.A1.T @ dZ2 / m
+        db2 = np.sum(dZ2, axis=0, keepdims=True)/m
+
+        dA1 = dZ2 @ self.W2.T
+        dZ1 = dA1 * self.relu_derivative(self.Z1)
+        dW1 = self.X.T @ dZ1 / m
+        db1 = np.sum(dZ1, axis=0, keepdims=True)/m
+
+        return {
+            "W1": dW1, "b1": db1,
+            "W2": dW2, "b2": db2,
+            "W3": dW3, "b3": db3
+        }
+
+    def predict(self, X):
+        return np.argmax(self.forward(X), axis=1)
+
+
+
+# ============================================================
+# 2. OPTIMIZERS
+# ============================================================
+
+class AdaFusion:
+    """
+    Your custom optimizer.
+    Adam → curvature scaling → variance tracking → SGD-momentum blend
+    """
+    def __init__(self,
+                 lr_adam=0.001,
+                 lr_sgd=0.01,
+                 beta1=0.9,
+                 beta2=0.999,
+                 momentum=0.9,
+                 curvature_k=0.05,
+                 switch_iter=1500,
+                 blend_iters=3000,
+                 epsilon=1e-8,
+                 window_size=10):
+
+        self.lr_adam = lr_adam
+        self.lr_sgd = lr_sgd
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.momentum = momentum
+        self.curvature_k = curvature_k
+        self.switch_iter = switch_iter
+        self.blend_iters = blend_iters
+        self.epsilon = epsilon
+        self.window_size = window_size
+
+        self.t = 0
+        self.m = {}
+        self.v = {}
+        self.buf = {}
+        self.prev_grad = None
+        self.grad_history = []
+
+    def update(self, params, grads):
+        self.t += 1
+        t = self.t
+
+        # gradient history for variance
+        self.grad_history.append({k: grads[k].copy() for k in grads})
+        if len(self.grad_history) > self.window_size:
+            self.grad_history.pop(0)
+
+        flat = np.concatenate([g[k].flatten() for g in self.grad_history for k in g])
+        grad_variance = np.var(flat) + 1e-12
+
+        # curvature estimate
+        if self.prev_grad is None:
+            curvature = 0
+        else:
+            curvature = np.sqrt(sum(
+                np.sum((grads[k] - self.prev_grad[k])**2)
+                for k in grads
+            ))
+        self.prev_grad = {k: grads[k].copy() for k in grads}
+
+        lr_scale = 1.0 / (1.0 + self.curvature_k * curvature)
+        lr_adam_eff = self.lr_adam * lr_scale
+        lr_sgd_eff = self.lr_sgd * lr_scale
+
+        # init state
+        if not self.m:
+            for k in params:
+                self.m[k] = np.zeros_like(params[k])
+                self.v[k] = np.zeros_like(params[k])
+                self.buf[k] = np.zeros_like(params[k])
+
+        # blended update
+        for k in params:
+            g = grads[k]
+
+            # Adam moments
+            self.m[k] = self.beta1*self.m[k] + (1-self.beta1)*g
+            self.v[k] = self.beta2*self.v[k] + (1-self.beta2)*(g*g)
+
+            m_hat = self.m[k] / (1-self.beta1**t)
+            v_hat = self.v[k] / (1-self.beta2**t)
+
+            adam_step = lr_adam_eff * m_hat / (np.sqrt(v_hat) + self.epsilon)
+
+            # SGD-momentum
+            self.buf[k] = self.momentum*self.buf[k] + g
+            sgd_step = lr_sgd_eff * self.buf[k]
+
+            # blending schedule
+            if t <= self.switch_iter:
+                w = 1.0
+            elif t >= self.switch_iter + self.blend_iters:
+                w = 0.0
+            else:
+                w = 1 - (t - self.switch_iter) / self.blend_iters
+
+            params[k] -= w * adam_step + (1-w) * sgd_step
+
+
+
+# ---------- Adam ----------
+class Adam:
+    def __init__(self, lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
+        self.lr = lr
+        self.b1 = b1
+        self.b2 = b2
+        self.eps = eps
+        self.m = {}
+        self.v = {}
+        self.t = 0
+
+    def update(self, params, grads):
+        if not self.m:
+            for k in params:
+                self.m[k] = np.zeros_like(params[k])
+                self.v[k] = np.zeros_like(params[k])
+
+        self.t += 1
+
+        for k in params:
+            g = grads[k]
+
+            self.m[k] = self.b1*self.m[k] + (1-self.b1)*g
+            self.v[k] = self.b2*self.v[k] + (1-self.b2)*(g*g)
+
+            m_hat = self.m[k] / (1-self.b1**self.t)
+            v_hat = self.v[k] / (1-self.b2**self.t)
+
+            params[k] -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+
+
+
+# ---------- RMSProp ----------
+class RMSProp:
+    def __init__(self, lr=0.001, beta=0.9, eps=1e-8):
+        self.lr = lr
+        self.beta = beta
+        self.eps = eps
+        self.v = {}
+
+    def update(self, params, grads):
+        if not self.v:
+            for k in params:
+                self.v[k] = np.zeros_like(params[k])
+
+        for k in params:
+            self.v[k] = self.beta*self.v[k] + (1-self.beta)*(grads[k]**2)
+            params[k] -= self.lr * grads[k] / (np.sqrt(self.v[k]) + self.eps)
+
+
+
+# ---------- SGD with Momentum ----------
+class SGDMomentum:
+    def __init__(self, lr=0.01, beta=0.9):
+        self.lr = lr
+        self.beta = beta
+        self.buf = {}
+
+    def update(self, params, grads):
+        if not self.buf:
+            for k in params:
+                self.buf[k] = np.zeros_like(params[k])
+
+        for k in params:
+            self.buf[k] = self.beta*self.buf[k] + grads[k]
+            params[k] -= self.lr * self.buf[k]
+
+
+
+# ============================================================
+# 3. DATA + UTILITIES
+# ============================================================
+
+def load_mnist(n=10000):
+    from sklearn.datasets import fetch_openml
+    from sklearn.model_selection import train_test_split
+
+    mnist = fetch_openml("mnist_784", version=1, as_frame=False)
+    X = mnist.data[:n].astype(np.float32)/255.0
+    y = mnist.target[:n].astype(int)
+
+    return train_test_split(X, y, test_size=0.2, random_state=42)
+
+def one_hot(y, C=10):
+    out = np.zeros((len(y),C))
+    out[np.arange(len(y)), y] = 1
+    return out
+
+def loss(pred, y):
+    pred = np.clip(pred, 1e-10, 1-1e-10)
+    return -np.mean(np.sum(y*np.log(pred), axis=1))
+
+
+
+# ============================================================
+# 4. TRAINING LOOP
+# ============================================================
+
+def train(model, opt, Xtr, ytr, Xte, yte, epochs=20, bs=64):
+
+    ytr_oh = one_hot(ytr)
+    yte_oh = one_hot(yte)
+
+    hist = {"loss": [], "test_acc": [], "time": None}
+
+    t0 = time.time()
+
+    for ep in range(epochs):
+
+        idx = np.random.permutation(len(Xtr))
+        Xs = Xtr[idx]
+        ys = ytr_oh[idx]
+
+        # batch loop
+        for i in range(0, len(Xtr), bs):
+            xb = Xs[i:i+bs]
+            yb = ys[i:i+bs]
+
+            preds = model.forward(xb)
+            grads = model.backward(yb)
+            opt.update(model.params, grads)
+
+        # epoch metrics
+        L = loss(model.forward(Xtr), ytr_oh)
+        acc = np.mean(model.predict(Xte) == yte) * 100
+
+        hist["loss"].append(L)
+        hist["test_acc"].append(acc)
+
+        print(f"Epoch {ep+1}/20 | Loss={L:.4f} | Test Acc={acc:.2f}%")
+
+    hist["time"] = time.time() - t0
+    return hist
+
+
+
+# ============================================================
+# 5. RUN ALL FOUR OPTIMIZERS
+# ============================================================
+
+Xtr, Xte, ytr, yte = load_mnist(10000)
+
+optimizers = {
+    "AdaFusion": AdaFusion(lr_adam=0.001, lr_sgd=0.01),
+    "Adam": Adam(lr=0.001),
+    "RMSProp": RMSProp(lr=0.001),
+    "SGD+Momentum": SGDMomentum(lr=0.01, beta=0.9)
+}
+
+histories = {}
+
+for name, opt in optimizers.items():
+    print("\n============================")
+    print(f"Training with {name}")
+    print("============================")
+
+    model = SimpleNN()
+    histories[name] = train(model, opt, Xtr, ytr, Xte, yte)
+
+
+
+# ============================================================
+# 6. PLOTS
+# ============================================================
+
+plt.figure(figsize=(12,5))
+for name in histories:
+    plt.plot(histories[name]["loss"], label=name)
+plt.title("Training Loss Curves")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12,5))
+for name in histories:
+    plt.plot(histories[name]["test_acc"], label=name)
+plt.title("Test Accuracy Curves")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy (%)")
+plt.legend()
+plt.show()
+
+
+
+# ============================================================
+# 7. FINAL REPORT (Matches Your Assignment Requirement)
+# ============================================================
+
+print("\n\n==================== FINAL REPORT ====================\n")
+
+print("Test Accuracy after 20 Epochs:")
+for name in histories:
+    print(f"{name}: {histories[name]['test_acc'][-1]:.2f}%")
+
+print("\nTraining Time (seconds per epoch):")
+for name in histories:
+    print(f"{name}: {histories[name]['time']/20:.4f} s/epoch")
