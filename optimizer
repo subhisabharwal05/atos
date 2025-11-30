@@ -1,7 +1,6 @@
-import numpy as np
-
-class AdaFusion:  
-    def _init_(self,
+class A2S:
+   
+    def __init__(self,
                  lr_adam=0.001,
                  lr_sgd=0.01,
                  beta1=0.9,
@@ -31,67 +30,58 @@ class AdaFusion:
         self.prev_grad = None
         self.grad_history = []
 
-   
-    #UPDATE STEP
-   
     def update(self, params, grads):
-       
         self.t += 1
         t = self.t
-    
-        # 1. Track gradient history (for variance estimation)
-        
-        self.grad_history.append(grads)
+
+        # recent gradient history
+        self.grad_history.append({k: grads[k].copy() for k in grads})
         if len(self.grad_history) > self.window_size:
             self.grad_history.pop(0)
 
-        # Compute gradient variance (scalar)
-        flat = np.concatenate([g.flatten() for g in self.grad_history])
-        grad_variance = np.var(flat)
+        flat = np.concatenate([g[k].flatten() for g in self.grad_history for k in g])
+        grad_variance = np.var(flat) + 1e-12  # currently not used, kept for extension
 
-        # 2. Curvature estimate (first-order finite difference)
-        
+        # curvature estimate from gradient difference
         if self.prev_grad is None:
             curvature = 0
         else:
-            curvature = np.sqrt(sum(np.sum((grads[k] - self.prev_grad[k])**2)
-                                    for k in grads))
-
+            curvature = np.sqrt(sum(
+                np.sum((grads[k] - self.prev_grad[k])**2)
+                for k in grads
+            ))
         self.prev_grad = {k: grads[k].copy() for k in grads}
 
-        # curvature-sensitive scaling
+        # curvature-based LR scaling
         lr_scale = 1.0 / (1.0 + self.curvature_k * curvature)
         lr_adam_eff = self.lr_adam * lr_scale
         lr_sgd_eff = self.lr_sgd * lr_scale
 
-        # 3. Initialize state dictionaries
-    
-        if len(self.m) == 0:
+        # init state
+        if not self.m:
             for k in params:
                 self.m[k] = np.zeros_like(params[k])
                 self.v[k] = np.zeros_like(params[k])
                 self.buf[k] = np.zeros_like(params[k])
 
-        # 4. Compute blended Adam + SGD-momentum update
-    
+        # blended Adam + SGD-momentum step
         for k in params:
-
             g = grads[k]
 
-            # Adam moments 
-            self.m[k] = self.beta1 * self.m[k] + (1 - self.beta1) * g
-            self.v[k] = self.beta2 * self.v[k] + (1 - self.beta2) * (g * g)
+            # Adam moments
+            self.m[k] = self.beta1*self.m[k] + (1-self.beta1)*g
+            self.v[k] = self.beta2*self.v[k] + (1-self.beta2)*(g*g)
 
-            m_hat = self.m[k] / (1 - self.beta1 ** t)
-            v_hat = self.v[k] / (1 - self.beta2 ** t)
+            m_hat = self.m[k] / (1-self.beta1**t)
+            v_hat = self.v[k] / (1-self.beta2**t)
 
             adam_step = lr_adam_eff * m_hat / (np.sqrt(v_hat) + self.epsilon)
 
-            #  SGD momentum 
-            self.buf[k] = self.momentum * self.buf[k] + g
+            # SGD momentum buffer
+            self.buf[k] = self.momentum*self.buf[k] + g
             sgd_step = lr_sgd_eff * self.buf[k]
 
-            #  Blending Schedule 
+            # blend weight: w=1 → pure Adam, w=0 → pure SGD
             if t <= self.switch_iter:
                 w = 1.0
             elif t >= self.switch_iter + self.blend_iters:
@@ -99,5 +89,4 @@ class AdaFusion:
             else:
                 w = 1 - (t - self.switch_iter) / self.blend_iters
 
-            step = w * adam_step + (1 - w) * sgd_step
-            params[k] -= step
+            params[k] -= w * adam_step + (1-w) * sgd_step
