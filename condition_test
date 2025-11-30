@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Quadratic generator
 def generate_quadratic(dim=10, cond_number=10):
     V = np.linalg.qr(np.random.randn(dim, dim))[0]
     eigvals = np.linspace(1, cond_number, dim)
@@ -21,10 +20,6 @@ def rosenbrock_grad(x):
     dy = 200*(x[1] - x[0]**2)
     return np.array([dx, dy])
 
-# ============================================================
-# a2s OPTIMIZER: Hybrid Curvature-Sensitive Adam → SGD-Momentum
-# ============================================================
-
 def a2s_optimizer(
         f, grad_f, x0,
         lr_adam=0.001,
@@ -39,15 +34,12 @@ def a2s_optimizer(
         tol=1e-6,
         max_iter=10000
     ):
-    """
-    a2s: Curvature-Sensitive Hybrid Adam → SGD-Momentum
-    """
-
+   
     x = x0.copy()
 
-    m = np.zeros_like(x)        # Adam first moment
-    v = np.zeros_like(x)        # Adam second moment
-    buf = np.zeros_like(x)      # SGD momentum buffer
+    m = np.zeros_like(x)        
+    v = np.zeros_like(x)       
+    buf = np.zeros_like(x)      
     prev_grad = None
 
     losses = []
@@ -61,9 +53,7 @@ def a2s_optimizer(
         if np.linalg.norm(g) < tol:
             return x, t, losses
 
-        # ------------------------------
-        # Curvature Estimate  ||g_t - g_{t-1}||
-        # ------------------------------
+       
         if prev_grad is None:
             curvature = 0
         else:
@@ -71,17 +61,13 @@ def a2s_optimizer(
 
         prev_grad = g.copy()
 
-        # ------------------------------
-        # Curvature-Sensitive LR Scaling
-        # ------------------------------
+        
         lr_scale = 1.0 / (1.0 + curvature_k * curvature)
 
         lr_adam_eff = lr_adam * lr_scale
         lr_sgd_eff = lr_sgd * lr_scale
 
-        # --------------------------------
-        # Adam Update
-        # --------------------------------
+       
         m = beta1 * m + (1 - beta1) * g
         v = beta2 * v + (1 - beta2) * (g * g)
 
@@ -90,15 +76,11 @@ def a2s_optimizer(
 
         adam_step = lr_adam_eff * m_hat / (np.sqrt(v_hat) + eps)
 
-        # --------------------------------
-        # SGD Momentum Update
-        # --------------------------------
+    
         buf = momentum * buf + g
         sgd_step = lr_sgd_eff * buf
 
-        # --------------------------------
-        # Phase Blending
-        # --------------------------------
+    
         if t <= switch_iter:
             w = 1.0
         elif t >= switch_iter + blend_iters:
@@ -160,10 +142,6 @@ def rmsprop(f, grad_f, x0, lr=0.001, beta=0.9, eps=1e-8, tol=1e-6):
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Include: generate_quadratic(), quadratic_f, quadratic_grad
-#          rosenbrock_f, rosenbrock_grad
-#          a2s_optimizer, adam, sgd_momentum, rmsprop
-
 
 def run_and_plot(f, grad, x0, optimizers, title):
     plt.figure(figsize=(7,5))
@@ -180,9 +158,8 @@ def run_and_plot(f, grad, x0, optimizers, title):
     plt.show()
 
 
-# -------------------------
 # 1. Well-Conditioned Quadratic
-# -------------------------
+
 dim = 10
 Q1 = generate_quadratic(dim, cond_number=10)
 x0 = np.random.randn(dim)
@@ -197,9 +174,8 @@ optimizers = {
 run_and_plot(lambda x: quadratic_f(x,Q1), lambda x: quadratic_grad(x,Q1),
              x0, optimizers, "Well-Conditioned Quadratic")
 
-# -------------------------
 # 2. Ill-Conditioned Quadratic
-# -------------------------
+
 Q2 = generate_quadratic(dim, cond_number=200)
 x0 = np.random.randn(dim)
 
@@ -213,9 +189,9 @@ optimizers = {
 run_and_plot(lambda x: quadratic_f(x,Q2), lambda x: quadratic_grad(x,Q2),
              x0, optimizers, "Ill-Conditioned Quadratic")
 
-# -------------------------
+
 # 3. Rosenbrock
-# -------------------------
+
 x0 = np.array([-1.2,1.0])
 
 optimizers = {
