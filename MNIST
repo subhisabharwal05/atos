@@ -1,25 +1,11 @@
-"""
-Complete MNIST Training Script
-Contains 4 optimizers:
-- AdaFusion (your optimizer)
-- Adam
-- RMSProp
-- SGD with Momentum
 
-Architecture: 784-128-64-10
-Batch size: 64
-Epochs: 20
-LR = 0.001 for all optimizers
-"""
 
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 
 
-# ============================================================
 # 1. MODEL: 784 → 128 → 64 → 10
-# ============================================================
 
 class SimpleNN:
     def __init__(self):
@@ -87,16 +73,10 @@ class SimpleNN:
         return np.argmax(self.forward(X), axis=1)
 
 
-
-# ============================================================
 # 2. OPTIMIZERS
-# ============================================================
 
 class AdaFusion:
-    """
-    Your custom optimizer.
-    Adam → curvature scaling → variance tracking → SGD-momentum blend
-    """
+   
     def __init__(self,
                  lr_adam=0.001,
                  lr_sgd=0.01,
@@ -153,18 +133,18 @@ class AdaFusion:
         lr_adam_eff = self.lr_adam * lr_scale
         lr_sgd_eff = self.lr_sgd * lr_scale
 
-        # init state
+        
         if not self.m:
             for k in params:
                 self.m[k] = np.zeros_like(params[k])
                 self.v[k] = np.zeros_like(params[k])
                 self.buf[k] = np.zeros_like(params[k])
 
-        # blended update
+       
         for k in params:
             g = grads[k]
 
-            # Adam moments
+        
             self.m[k] = self.beta1*self.m[k] + (1-self.beta1)*g
             self.v[k] = self.beta2*self.v[k] + (1-self.beta2)*(g*g)
 
@@ -173,11 +153,10 @@ class AdaFusion:
 
             adam_step = lr_adam_eff * m_hat / (np.sqrt(v_hat) + self.epsilon)
 
-            # SGD-momentum
             self.buf[k] = self.momentum*self.buf[k] + g
             sgd_step = lr_sgd_eff * self.buf[k]
 
-            # blending schedule
+
             if t <= self.switch_iter:
                 w = 1.0
             elif t >= self.switch_iter + self.blend_iters:
@@ -188,8 +167,6 @@ class AdaFusion:
             params[k] -= w * adam_step + (1-w) * sgd_step
 
 
-
-# ---------- Adam ----------
 class Adam:
     def __init__(self, lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
         self.lr = lr
@@ -220,8 +197,6 @@ class Adam:
             params[k] -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 
 
-
-# ---------- RMSProp ----------
 class RMSProp:
     def __init__(self, lr=0.001, beta=0.9, eps=1e-8):
         self.lr = lr
@@ -239,8 +214,6 @@ class RMSProp:
             params[k] -= self.lr * grads[k] / (np.sqrt(self.v[k]) + self.eps)
 
 
-
-# ---------- SGD with Momentum ----------
 class SGDMomentum:
     def __init__(self, lr=0.01, beta=0.9):
         self.lr = lr
@@ -256,11 +229,6 @@ class SGDMomentum:
             self.buf[k] = self.beta*self.buf[k] + grads[k]
             params[k] -= self.lr * self.buf[k]
 
-
-
-# ============================================================
-# 3. DATA + UTILITIES
-# ============================================================
 
 def load_mnist(n=10000):
     from sklearn.datasets import fetch_openml
@@ -282,11 +250,6 @@ def loss(pred, y):
     return -np.mean(np.sum(y*np.log(pred), axis=1))
 
 
-
-# ============================================================
-# 4. TRAINING LOOP
-# ============================================================
-
 def train(model, opt, Xtr, ytr, Xte, yte, epochs=20, bs=64):
 
     ytr_oh = one_hot(ytr)
@@ -302,7 +265,6 @@ def train(model, opt, Xtr, ytr, Xte, yte, epochs=20, bs=64):
         Xs = Xtr[idx]
         ys = ytr_oh[idx]
 
-        # batch loop
         for i in range(0, len(Xtr), bs):
             xb = Xs[i:i+bs]
             yb = ys[i:i+bs]
@@ -311,7 +273,6 @@ def train(model, opt, Xtr, ytr, Xte, yte, epochs=20, bs=64):
             grads = model.backward(yb)
             opt.update(model.params, grads)
 
-        # epoch metrics
         L = loss(model.forward(Xtr), ytr_oh)
         acc = np.mean(model.predict(Xte) == yte) * 100
 
@@ -323,11 +284,6 @@ def train(model, opt, Xtr, ytr, Xte, yte, epochs=20, bs=64):
     hist["time"] = time.time() - t0
     return hist
 
-
-
-# ============================================================
-# 5. RUN ALL FOUR OPTIMIZERS
-# ============================================================
 
 Xtr, Xte, ytr, yte = load_mnist(10000)
 
@@ -341,18 +297,12 @@ optimizers = {
 histories = {}
 
 for name, opt in optimizers.items():
-    print("\n============================")
+    print("\n")
     print(f"Training with {name}")
-    print("============================")
 
     model = SimpleNN()
     histories[name] = train(model, opt, Xtr, ytr, Xte, yte)
 
-
-
-# ============================================================
-# 6. PLOTS
-# ============================================================
 
 plt.figure(figsize=(12,5))
 for name in histories:
@@ -374,11 +324,7 @@ plt.show()
 
 
 
-# ============================================================
-# 7. FINAL REPORT (Matches Your Assignment Requirement)
-# ============================================================
-
-print("\n\n==================== FINAL REPORT ====================\n")
+print("\n\n FINAL REPORT\n")
 
 print("Test Accuracy after 20 Epochs:")
 for name in histories:
