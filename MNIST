@@ -75,7 +75,7 @@ class SimpleNN:
 
 # 2. OPTIMIZERS
 
-class AdaFusion:
+class A2S:
    
     def __init__(self,
                  lr_adam=0.001,
@@ -288,7 +288,7 @@ def train(model, opt, Xtr, ytr, Xte, yte, epochs=20, bs=64):
 Xtr, Xte, ytr, yte = load_mnist(10000)
 
 optimizers = {
-    "AdaFusion": AdaFusion(lr_adam=0.001, lr_sgd=0.01),
+    "A2S": A2S(lr_adam=0.001, lr_sgd=0.01),
     "Adam": Adam(lr=0.001),
     "RMSProp": RMSProp(lr=0.001),
     "SGD+Momentum": SGDMomentum(lr=0.01, beta=0.9)
